@@ -1,0 +1,135 @@
+# -*- coding: utf-8 -*-
+from flask import Flask, jsonify
+import threading
+import time
+import random
+import pyttsx3
+from datetime import datetime
+import logging
+import json
+
+# Configuração avançada de logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('battery_monitor.log'),
+        logging.StreamHandler()
+    ]
+)
+
+app = Flask(__name__)
+
+# Configurações avançadas
+class BatteryConfig:
+    CAPACIDADE_TOTAL_WH = 2400
+    LIMITE_ALERTA_CARGA = 20
+    INTERVALO_ATUALIZACAO = 5
+    HISTORICO_LIMITE = 100
+
+dados_atuais = {
+    "carga": 100,
+    "consumo": 300,
+    "autonomia": 0.0,
+    "alerta": False,
+    "ultima_atualizacao": datetime.now().isoformat(),
+    "historico": []
+}
+
+def obter_dados_bateria(simular_falha=False):
+    """Obtém dados da bateria com possibilidade de simular falhas"""
+    if simular_falha and random.random() < 0.1:
+        raise ValueError("Falha simulada na leitura da bateria")
+    
+    carga = random.randint(10, 100)
+    consumo = random.randint(200, 700)
+    return carga, consumo
+
+def calcular_autonomia(carga_percentual, consumo_watts):
+    """Calcula autonomia com tratamento robusto de erros"""
+    try:
+        if consumo_watts <= 0:
+            return 999.0
+        
+        energia_restante = BatteryConfig.CAPACIDADE_TOTAL_WH * (carga_percentual / 100)
+        autonomia = round(energia_restante / consumo_watts, 2)
+        return max(0, autonomia)  # Evita valores negativos
+    except Exception as e:
+        logging.error(f"Erro no cálculo de autonomia: {e}")
+        return 0.0
+
+def falar_autonomia(autonomia):
+    """Sistema de notificação por voz com fallback"""
+    try:
+        engine = pyttsx3.init()
+        mensagem = f"Autonomia atual: {autonomia:.1f} horas."
+        logging.info(mensagem)
+        engine.say(mensagem)
+        engine.runAndWait()
+    except Exception as e:
+        logging.warning(f"Notificação por voz falhou: {e}")
+        # Fallback: enviar notificação por outro meio
+
+def atualizar_dados():
+    """Thread principal de atualização de dados"""
+    while True:
+        try:
+            carga, consumo = obter_dados_bateria()
+            autonomia = calcular_autonomia(carga, consumo)
+            alerta = carga < BatteryConfig.LIMITE_ALERTA_CARGA
+
+            # Atualiza histórico (mantendo tamanho limitado)
+            dados_atuais['historico'].append({
+                "timestamp": datetime.now().isoformat(),
+                "carga": carga,
+                "consumo": consumo,
+                "autonomia": autonomia
+            })
+            dados_atuais['historico'] = dados_atuais['historico'][-BatteryConfig.HISTORICO_LIMITE:]
+
+            dados_atuais.update({
+                "carga": carga,
+                "consumo": consumo,
+                "autonomia": autonomia,
+                "alerta": alerta,
+                "ultima_atualizacao": datetime.now().isoformat()
+            })
+
+            if alerta:
+                falar_autonomia(autonomia)
+
+        except Exception as e:
+            logging.error(f"Erro na atualização de dados: {e}")
+
+        time.sleep(BatteryConfig.INTERVALO_ATUALIZACAO)
+
+@app.route("/dados")
+def get_dados():
+    """Endpoint principal da API"""
+    return jsonify(dados_atuais)
+
+@app.route("/status")
+def get_status():
+    """Endpoint simplificado para verificações rápidas"""
+    return jsonify({
+        "status": "operacional",
+        "ultima_atualizacao": dados_atuais["ultima_atualizacao"],
+        "alerta": dados_atuais["alerta"]
+    })
+
+@app.route("/historico")
+def get_historico():
+    """Endpoint para acesso ao histórico"""
+    return jsonify(dados_atuais["historico"])
+
+def iniciar_servidor():
+    """Inicializa o servidor com configurações adequadas"""
+    logging.info("Iniciando servidor de monitoramento de bateria")
+    thread = threading.Thread(target=atualizar_dados)
+    thread.daemon = True
+    thread.start()
+    
+    app.run(host='0.0.0.0', port=5000, debug=False)
+
+if __name__ == "__main__":
+    iniciar_servidor()
