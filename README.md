@@ -14,4 +14,4 @@ Sistema inteligente para monitoramento de baterias com alertas por voz e API RES
 
 1. Instale as dependências:
 ```bash
-pip install -r requirements.txt
+pip install flask==2.3.2 pyttsx3==2.90 python-dotenv==1.0.0 pytest==7.4.0 pytest-cov==4.1.0 gunicorn==20.1.0
